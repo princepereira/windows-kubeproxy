@@ -4,10 +4,12 @@ approvers:
   - feiskyer
   - sbangari
   - daschott
+  - princepereira
 reviewers:
   - feiskyer
   - sbangari
   - daschott
+  - princepereira
 labels:
   - sig/network
   - sig/windows
