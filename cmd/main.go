@@ -4,7 +4,7 @@ import (
 	"os"
 
 	"k8s.io/component-base/cli"
-	proxyapp "k8s.io/kubernetes/cmd/kube-proxy/app"
+	proxyapp "github.com/windows-kubeproxy/cmd/app"
 )
 
 func main() {
