@@ -1,3 +1,5 @@
+//go:build windows
+
 /*
 Copyright 2014 The Kubernetes Authors.
 
@@ -27,10 +29,10 @@ import (
 	// Enable pprof HTTP handlers.
 	_ "net/http/pprof"
 
+	winkernel "github.com/windows-kubeproxy/pkg/winkernel"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/proxy"
 	proxyconfigapi "k8s.io/kubernetes/pkg/proxy/apis/config"
-	winkernel "github.com/windows-kubeproxy/pkg/winkernel"
 )
 
 // platformApplyDefaults is called after parsing command-line flags and/or reading the

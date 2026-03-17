@@ -41,12 +41,7 @@ github.com/coreos/go-semver/semver
 # github.com/coreos/go-systemd/v22 v22.5.0
 ## explicit; go 1.12
 github.com/coreos/go-systemd/v22/daemon
-github.com/coreos/go-systemd/v22/dbus
 github.com/coreos/go-systemd/v22/journal
-# github.com/cyphar/filepath-securejoin v0.6.0
-## explicit; go 1.18
-github.com/cyphar/filepath-securejoin
-github.com/cyphar/filepath-securejoin/internal/consts
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
@@ -84,9 +79,6 @@ github.com/go-openapi/jsonreference/internal
 # github.com/go-openapi/swag v0.23.0
 ## explicit; go 1.20
 github.com/go-openapi/swag
-# github.com/godbus/dbus/v5 v5.1.0
-## explicit; go 1.12
-github.com/godbus/dbus/v5
 # github.com/gogo/protobuf v1.3.2
 ## explicit; go 1.15
 github.com/gogo/protobuf/gogoproto
@@ -98,17 +90,6 @@ github.com/golang/protobuf/proto
 # github.com/google/btree v1.1.3
 ## explicit; go 1.18
 github.com/google/btree
-# github.com/google/cadvisor v0.53.0
-## explicit; go 1.23.0
-github.com/google/cadvisor/devicemapper
-github.com/google/cadvisor/fs
-github.com/google/cadvisor/info/v1
-github.com/google/cadvisor/machine
-github.com/google/cadvisor/nvm
-github.com/google/cadvisor/utils
-github.com/google/cadvisor/utils/cloudinfo
-github.com/google/cadvisor/utils/sysfs
-github.com/google/cadvisor/utils/sysinfo
 # github.com/google/cel-go v0.26.0
 ## explicit; go 1.22.0
 github.com/google/cel-go/cel
@@ -180,18 +161,6 @@ github.com/lithammer/dedent
 github.com/mailru/easyjson/buffer
 github.com/mailru/easyjson/jlexer
 github.com/mailru/easyjson/jwriter
-# github.com/mistifyio/go-zfs v2.1.2-0.20190413222219-f784269be439+incompatible
-## explicit
-github.com/mistifyio/go-zfs
-# github.com/moby/ipvs v1.1.0
-## explicit; go 1.17
-github.com/moby/ipvs
-# github.com/moby/sys/mountinfo v0.7.2
-## explicit; go 1.17
-github.com/moby/sys/mountinfo
-# github.com/moby/sys/userns v0.1.0
-## explicit; go 1.21
-github.com/moby/sys/userns
 # github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
 ## explicit
 github.com/modern-go/concurrent
@@ -201,10 +170,6 @@ github.com/modern-go/reflect2
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
-# github.com/opencontainers/cgroups v0.0.3
-## explicit; go 1.23.0
-github.com/opencontainers/cgroups
-github.com/opencontainers/cgroups/devices/config
 # github.com/opencontainers/go-digest v1.0.0
 ## explicit; go 1.13
 github.com/opencontainers/go-digest
@@ -256,7 +221,6 @@ github.com/stretchr/testify/assert
 github.com/stretchr/testify/assert/yaml
 # github.com/vishvananda/netlink v1.3.1
 ## explicit; go 1.12
-github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.5
 ## explicit; go 1.17
@@ -1334,7 +1298,6 @@ k8s.io/kube-proxy/config/v1alpha1
 k8s.io/kubelet/pkg/apis
 # k8s.io/kubernetes v1.35.0
 ## explicit; go 1.25.0
-k8s.io/kubernetes/cmd/kube-proxy/app
 k8s.io/kubernetes/pkg/api/service
 k8s.io/kubernetes/pkg/api/v1/pod
 k8s.io/kubernetes/pkg/api/v1/service
@@ -1355,7 +1318,6 @@ k8s.io/kubernetes/pkg/cluster/ports
 k8s.io/kubernetes/pkg/features
 k8s.io/kubernetes/pkg/fieldpath
 k8s.io/kubernetes/pkg/kubelet/apis/config
-k8s.io/kubernetes/pkg/kubelet/cm/util
 k8s.io/kubernetes/pkg/kubelet/qos
 k8s.io/kubernetes/pkg/kubelet/types
 k8s.io/kubernetes/pkg/proxy
@@ -1365,33 +1327,19 @@ k8s.io/kubernetes/pkg/proxy/apis/config/scheme
 k8s.io/kubernetes/pkg/proxy/apis/config/v1alpha1
 k8s.io/kubernetes/pkg/proxy/apis/config/validation
 k8s.io/kubernetes/pkg/proxy/config
-k8s.io/kubernetes/pkg/proxy/conntrack
 k8s.io/kubernetes/pkg/proxy/healthcheck
-k8s.io/kubernetes/pkg/proxy/iptables
-k8s.io/kubernetes/pkg/proxy/ipvs
-k8s.io/kubernetes/pkg/proxy/ipvs/ipset
-k8s.io/kubernetes/pkg/proxy/ipvs/util
 k8s.io/kubernetes/pkg/proxy/metaproxier
 k8s.io/kubernetes/pkg/proxy/metrics
-k8s.io/kubernetes/pkg/proxy/nftables
 k8s.io/kubernetes/pkg/proxy/runner
 k8s.io/kubernetes/pkg/proxy/util
 k8s.io/kubernetes/pkg/proxy/util/nfacct
-k8s.io/kubernetes/pkg/proxy/winkernel
 k8s.io/kubernetes/pkg/proxy/winkernel/testing
 k8s.io/kubernetes/pkg/util/filesystem
 k8s.io/kubernetes/pkg/util/flag
-k8s.io/kubernetes/pkg/util/iptables
-k8s.io/kubernetes/pkg/util/kernel
 k8s.io/kubernetes/pkg/util/node
-k8s.io/kubernetes/pkg/util/oom
 k8s.io/kubernetes/pkg/util/parsers
 k8s.io/kubernetes/pkg/util/taints
 k8s.io/kubernetes/pkg/windows/service
-k8s.io/kubernetes/third_party/forked/libcontainer/utils
-# k8s.io/mount-utils v0.0.0 => ./staging/src/k8s.io/mount-utils
-## explicit; go 1.25.0
-k8s.io/mount-utils
 # k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 ## explicit; go 1.18
 k8s.io/utils/buffer
@@ -1399,8 +1347,6 @@ k8s.io/utils/clock
 k8s.io/utils/exec
 k8s.io/utils/internal/third_party/forked/golang/golang-lru
 k8s.io/utils/internal/third_party/forked/golang/net
-k8s.io/utils/io
-k8s.io/utils/keymutex
 k8s.io/utils/lru
 k8s.io/utils/net
 k8s.io/utils/path
@@ -1416,9 +1362,6 @@ sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client
 ## explicit; go 1.23
 sigs.k8s.io/json
 sigs.k8s.io/json/internal/golang/encoding/json
-# sigs.k8s.io/knftables v0.0.17
-## explicit; go 1.20
-sigs.k8s.io/knftables
 # sigs.k8s.io/randfill v1.0.0
 ## explicit; go 1.18
 sigs.k8s.io/randfill

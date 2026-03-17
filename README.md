@@ -19,6 +19,13 @@ git checkout master   # or v1.32.x
 robocopy staging "$HOME\GoProjects\src\windows-kubeproxy\staging" /E /FFT /Z /MT:16
 ```
 
+# How to Update Vendor Dependencies
+After syncing the staging directory, update the vendor directory to ensure all required packages are fully vendored:
+```
+go mod tidy
+go mod vendor
+```
+
 # How to Build From Linux / WSL / macOS
 ```
 GOOS=windows GOARCH=amd64 go build -o kube-proxy.exe ./cmd
