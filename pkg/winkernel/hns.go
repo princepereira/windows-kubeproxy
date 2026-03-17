@@ -138,7 +138,7 @@ func (hns hns) getAllEndpointsByNetwork(networkName string) (map[string]*(endpoi
 				// Expecting only ipv4 and ipv6 ipaddresses
 				// This is highly unlikely to happen, but if it does, we should log a warning
 				// and break out of the loop
-				klog.Warning("Endpoint ipconfiguration holds more than 2 IP addresses.", "hnsID", ep.Id, "IP", ipConfig.IpAddress, "ipConfigCount", len(ep.IpConfigurations))
+				klog.InfoS("Endpoint ipconfiguration holds more than 2 IP addresses", "hnsID", ep.Id, "IP", ipConfig.IpAddress, "ipConfigCount", len(ep.IpConfigurations))
 				break
 			}
 

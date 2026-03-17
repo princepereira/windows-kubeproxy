@@ -23,6 +23,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/proxy"
 )
 
 type loadbalancerType string
@@ -36,6 +37,7 @@ const (
 )
 
 type loadbalancerConfig struct {
+	serviceName             string
 	hnsID                   string
 	srcVip                  string
 	vip                     string
@@ -50,8 +52,8 @@ type loadbalancerConfig struct {
 }
 
 func (lbConfig *loadbalancerConfig) String() string {
-	return fmt.Sprintf("LoadbalancerConfig: {hnsID: %s, srcVip: %s, vip: %s, protocol: %d, internalPort: %d, externalPort: %d, endpointsAvailableForLB: %t, lbFlags: %v, loadbalancerType: %s, endpoints: %v, queriedLoadBalancers: %v}",
-		lbConfig.hnsID, lbConfig.srcVip, lbConfig.vip, lbConfig.protocol, lbConfig.internalPort, lbConfig.externalPort, lbConfig.endpointsAvailableForLB, lbConfig.lbFlags, lbConfig.loadbalancerType, lbConfig.endpoints, lbConfig.queriedLoadBalancers)
+	return fmt.Sprintf("LoadbalancerConfig: {serviceName: %s, hnsID: %s, srcVip: %s, vip: %s, protocol: %d, internalPort: %d, externalPort: %d, endpointsAvailableForLB: %t, lbFlags: %v, loadbalancerType: %s, endpointCount: %d}",
+		lbConfig.serviceName, lbConfig.hnsID, lbConfig.srcVip, lbConfig.vip, lbConfig.protocol, lbConfig.internalPort, lbConfig.externalPort, lbConfig.endpointsAvailableForLB, lbConfig.lbFlags, lbConfig.loadbalancerType, len(lbConfig.endpoints))
 }
 
 func (proxier *Proxier) requiresUpdateLoadbalancer(lbHnsID string, endpointCount int) bool {
@@ -63,7 +65,7 @@ func (proxier *Proxier) requiresUpdateLoadbalancer(lbHnsID string, endpointCount
 func (proxier *Proxier) handleUpdateLoadbalancerFailure(err error, hnsID, svcIP string, endpointCount int) (skipIteration bool) {
 	if err != nil {
 		if proxier.hcn.IsNotImplemented(err) {
-			klog.Warning("Update loadbalancer policies is not implemented.", "hnsID", hnsID, "svcIP", svcIP, "endpointCount", endpointCount)
+			klog.InfoS("Update loadbalancer policies is not implemented", "hnsID", hnsID, "svcIP", svcIP, "endpointCount", endpointCount)
 			proxier.supportedFeatures.ModifyLoadbalancer = false
 		} else {
 			klog.ErrorS(err, "Update loadbalancer policy failed", "hnsID", hnsID, "svcIP", svcIP, "endpointCount", endpointCount)
@@ -79,7 +81,7 @@ func (proxier *Proxier) handleUpdateLoadbalancerFailure(err error, hnsID, svcIP 
 // and the function proceeds with deleting and recreating the load balancer.
 // If the initial check determines that update criteria are not met, it directly proceeds with deletion (if necessary) and creation of the load balancer.
 func (proxier *Proxier) manageLoadbalancer(lbConfig *loadbalancerConfig) (success bool) {
-	klog.V(3).InfoS("manageLoadbalancer invoked", "LoadbalancerConfig", lbConfig)
+	klog.V(3).InfoS("manageLoadbalancer invoked", "serviceName", lbConfig.serviceName, "LoadbalancerConfig", lbConfig)
 	success = true
 	if proxier.requiresUpdateLoadbalancer(lbConfig.hnsID, len(lbConfig.endpoints)) && lbConfig.endpointsAvailableForLB {
 		hnsLoadBalancer, err := proxier.hns.updateLoadBalancer(
@@ -97,9 +99,9 @@ func (proxier *Proxier) manageLoadbalancer(lbConfig *loadbalancerConfig) (succes
 			return false
 		}
 		if proxier.supportedFeatures.ModifyLoadbalancer {
-			klog.V(3).InfoS("Loadbalancer update successful.", "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "hnsID", hnsLoadBalancer.hnsID, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
+			klog.V(3).InfoS("Loadbalancer update successful.", "serviceName", lbConfig.serviceName, "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "hnsID", hnsLoadBalancer.hnsID, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
 		} else {
-			klog.Warning("Loadbalancer update unsupported by hns", "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "hnsID", hnsLoadBalancer.hnsID, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
+			klog.InfoS("Loadbalancer update unsupported by HNS, falling back to delete and recreate", "serviceName", lbConfig.serviceName, "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "hnsID", hnsLoadBalancer.hnsID, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
 		}
 	}
 
@@ -118,12 +120,12 @@ func (proxier *Proxier) manageLoadbalancer(lbConfig *loadbalancerConfig) (succes
 				lbConfig.queriedLoadBalancers,
 			)
 			if err != nil {
-				klog.ErrorS(err, "Loadbalancer policy creation failed", "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
+				klog.ErrorS(err, "Loadbalancer policy creation failed", "serviceName", lbConfig.serviceName, "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
 				return false
 			}
 
 			lbConfig.hnsID = hnsLoadBalancer.hnsID
-			klog.V(3).InfoS("Loadbalancer create successful.", "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "hnsID", hnsLoadBalancer.hnsID, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
+			klog.V(3).InfoS("Loadbalancer create successful.", "serviceName", lbConfig.serviceName, "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "hnsID", hnsLoadBalancer.hnsID, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
 		} else {
 			klog.V(3).InfoS("Skipped creating Hns LoadBalancer for cluster ip resources. Reason : No endpoints available", "LoadbalancerType", lbConfig.loadbalancerType, "srcVip", lbConfig.srcVip, "vip", lbConfig.vip, "ExternalPort", lbConfig.externalPort, "InternalPort", lbConfig.internalPort, "protocol", lbConfig.protocol, "EndpointCount", len(lbConfig.endpoints))
 		}
@@ -132,10 +134,11 @@ func (proxier *Proxier) manageLoadbalancer(lbConfig *loadbalancerConfig) (succes
 }
 
 // manageClusterIPLoadbalancer manages the lifecycle of the ClusterIP load balancer.
-func (proxier *Proxier) manageClusterIPLoadbalancer(srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo) (success bool) {
+func (proxier *Proxier) manageClusterIPLoadbalancer(svcName proxy.ServicePortName, srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo) (success bool) {
 	success = true
 	sessionAffinityClientIP := svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP
 	lbConfig := loadbalancerConfig{
+		serviceName:             svcName.String(),
 		loadbalancerType:        loadbalancerTypeClusterIP,
 		hnsID:                   svcInfo.hnsID,
 		srcVip:                  srcVip,
@@ -154,13 +157,14 @@ func (proxier *Proxier) manageClusterIPLoadbalancer(srcVip string, svcInfo *serv
 }
 
 // manageNodePortLoadbalancer manages the lifecycle of the NodePort load balancer.
-func (proxier *Proxier) manageNodePortLoadbalancer(srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo, endpointsAvailableForLB bool) (success bool) {
+func (proxier *Proxier) manageNodePortLoadbalancer(svcName proxy.ServicePortName, srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo, endpointsAvailableForLB bool) (success bool) {
 	if svcInfo.NodePort() <= 0 {
 		return true
 	}
 	success = true
 	sessionAffinityClientIP := svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP
 	lbConfig := loadbalancerConfig{
+		serviceName:             svcName.String(),
 		loadbalancerType:        loadbalancerTypeNodePort,
 		hnsID:                   svcInfo.nodePorthnsID,
 		srcVip:                  srcVip,
@@ -179,10 +183,11 @@ func (proxier *Proxier) manageNodePortLoadbalancer(srcVip string, svcInfo *servi
 }
 
 // manageExternalIPLoadbalancers manages the lifecycle of the ExternalIP load balancers.
-func (proxier *Proxier) manageExternalIPLoadbalancers(srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo, endpointsAvailableForLB bool) (success bool) {
+func (proxier *Proxier) manageExternalIPLoadbalancers(svcName proxy.ServicePortName, srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo, endpointsAvailableForLB bool) (success bool) {
 	success = true
 	sessionAffinityClientIP := svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP
 	lbConfig := loadbalancerConfig{
+		serviceName:             svcName.String(),
 		loadbalancerType:        loadbalancerTypeExternalIP,
 		srcVip:                  srcVip,
 		protocol:                Enum(svcInfo.Protocol()),
@@ -201,7 +206,7 @@ func (proxier *Proxier) manageExternalIPLoadbalancers(srcVip string, svcInfo *se
 		success = proxier.manageLoadbalancer(&lbConfig)
 		externalIP.hnsID = lbConfig.hnsID
 		if !success {
-			klog.Warning("Failed to manage ExternalIP loadbalancer", "hnsID", lbConfig.hnsID, "vip", lbConfig.vip)
+			klog.InfoS("Failed to manage ExternalIP loadbalancer", "hnsID", lbConfig.hnsID, "vip", lbConfig.vip)
 			return false
 		}
 	}
@@ -210,8 +215,7 @@ func (proxier *Proxier) manageExternalIPLoadbalancers(srcVip string, svcInfo *se
 }
 
 // manageIngressIPLoadbalancers manages the lifecycle of the IngressIP load balancers.
-func (proxier *Proxier) manageIngressIPLoadbalancers(srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo, endpointsAvailableForLB bool) (success bool) {
-	var gatewayHnsendpoint *endpointInfo
+func (proxier *Proxier) manageIngressIPLoadbalancers(svcName proxy.ServicePortName, srcVip string, svcInfo *serviceInfo, endpoints []endpointInfo, queriedLoadBalancers map[loadBalancerIdentifier]*loadBalancerInfo, endpointsAvailableForLB bool, gatewayHnsendpoint *endpointInfo) (success bool) {
 	var gwEndpoints []endpointInfo
 	success = true
 	sessionAffinityClientIP := svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP
@@ -221,15 +225,12 @@ func (proxier *Proxier) manageIngressIPLoadbalancers(srcVip string, svcInfo *ser
 		healthPort = svcInfo.HealthCheckNodePort()
 	}
 
-	if proxier.forwardHealthCheckVip && endpointsAvailableForLB {
-		gatewayHnsendpoint, _ = proxier.hns.getEndpointByName(proxier.rootHnsEndpointName)
-	}
-
-	if gatewayHnsendpoint != nil {
+	if gatewayHnsendpoint != nil && endpointsAvailableForLB {
 		gwEndpoints = append(gwEndpoints, *gatewayHnsendpoint)
 	}
 
 	lbConfigIngressIP := loadbalancerConfig{
+		serviceName:             svcName.String(),
 		loadbalancerType:        loadbalancerTypeIngressIP,
 		srcVip:                  srcVip,
 		protocol:                Enum(svcInfo.Protocol()),
@@ -242,6 +243,7 @@ func (proxier *Proxier) manageIngressIPLoadbalancers(srcVip string, svcInfo *ser
 	}
 
 	lbConfigHealthCheck := loadbalancerConfig{
+		serviceName:             svcName.String(),
 		loadbalancerType:        loadbalancerTypeHealthCheck,
 		srcVip:                  srcVip,
 		protocol:                Enum(svcInfo.Protocol()),
@@ -260,7 +262,7 @@ func (proxier *Proxier) manageIngressIPLoadbalancers(srcVip string, svcInfo *ser
 		success = proxier.manageLoadbalancer(&lbConfigIngressIP)
 		lbIngressIP.hnsID = lbConfigIngressIP.hnsID
 		if !success {
-			klog.Warning("Failed to manage IngressIP loadbalancer", "hnsID", lbConfigIngressIP.hnsID, "vip", lbConfigIngressIP.vip)
+			klog.InfoS("Failed to manage IngressIP loadbalancer", "hnsID", lbConfigIngressIP.hnsID, "vip", lbConfigIngressIP.vip)
 			return false
 		}
 
@@ -269,7 +271,7 @@ func (proxier *Proxier) manageIngressIPLoadbalancers(srcVip string, svcInfo *ser
 		success = proxier.manageLoadbalancer(&lbConfigHealthCheck)
 		lbIngressIP.healthCheckHnsID = lbConfigHealthCheck.hnsID
 		if !success {
-			klog.Warning("Failed to manage IngressIP HealthCheck loadbalancer", "hnsID", lbConfigHealthCheck.hnsID, "vip", lbConfigHealthCheck.vip)
+			klog.InfoS("Failed to manage IngressIP HealthCheck loadbalancer", "hnsID", lbConfigHealthCheck.hnsID, "vip", lbConfigHealthCheck.vip)
 			return false
 		}
 	}
