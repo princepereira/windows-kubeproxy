@@ -43,7 +43,7 @@ go build -o kube-proxy.exe ./cmd
 ```
 GOOS=windows GOARCH=amd64 go build \
   -ldflags "\
-  -X k8s.io/component-base/version.gitVersion=v1.32.0-custom \
+  -X k8s.io/component-base/version.gitVersion=v1.32.7 \
   -X k8s.io/component-base/version.gitCommit=$(git rev-parse HEAD) \
   -X k8s.io/component-base/version.gitTreeState=clean" \
   -o kube-proxy.exe ./cmd
