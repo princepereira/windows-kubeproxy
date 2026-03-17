@@ -249,7 +249,7 @@ type endpointInfo struct {
 	isLocal         bool
 	macAddress      string
 	hnsID           string
-	refCount        *uint16
+	refCount        *int32
 	providerAddress string
 	hns             HostNetworkService
 
@@ -383,12 +383,9 @@ func (proxier *Proxier) onEndpointsMapChange(svcPortName *proxy.ServicePortName,
 		if exists {
 			// Cleanup Endpoints references
 			for _, ep := range epInfos {
-				epInfo, ok := ep.(*endpointInfo)
-
-				if ok {
+				if epInfo, ok := ep.(*endpointInfo); ok {
 					epInfo.Cleanup()
 				}
-
 			}
 		}
 	}
@@ -432,7 +429,6 @@ func (proxier *Proxier) newEndpointInfo(baseInfo *proxy.BaseEndpointInfo, _ *pro
 		port:       uint16(baseInfo.Port()),
 		isLocal:    baseInfo.IsLocal(),
 		macAddress: conjureMac("02-11", netutils.ParseIPSloppy(baseInfo.IP())),
-		refCount:   new(uint16),
 		hnsID:      "",
 		hns:        proxier.hns,
 
@@ -460,27 +456,24 @@ func newSourceVIP(hns HostNetworkService, network string, ip string, mac string,
 }
 
 func (ep *endpointInfo) DecrementRefCount() {
-	klog.V(3).InfoS("Decrementing Endpoint RefCount", "endpointInfo", ep)
 	if !ep.IsLocal() && ep.refCount != nil && *ep.refCount > 0 {
 		*ep.refCount--
 	}
-	refCount := 0
-	if ep.refCount != nil {
-		refCount = int(*ep.refCount)
-	}
-	klog.V(5).InfoS("Endpoint RefCount after decrement.", "endpointInfo", ep, "refCount", refCount)
+	klog.V(5).InfoS("Endpoint RefCount after decrement", "endpointInfo", ep, "refCount", ep.getRefCountValue())
 }
 
 func (ep *endpointInfo) Cleanup() {
 	klog.V(3).InfoS("Endpoint cleanup", "endpointInfo", ep)
 	if !ep.IsLocal() && ep.refCount != nil {
-		*ep.refCount--
+		if *ep.refCount > 0 {
+			*ep.refCount--
+		}
 
 		// Remove the remote hns endpoint, if no service is referring it
 		// Never delete a Local Endpoint. Local Endpoints are already created by other entities.
 		// Remove only remote endpoints created by this service
-		if *ep.refCount <= 0 && !ep.IsLocal() {
-			klog.V(4).InfoS("Removing endpoints, since no one is referencing it", "endpoint", ep)
+		if *ep.refCount <= 0 {
+			klog.V(4).InfoS("Removing endpoint, since no one is referencing it", "endpoint", ep)
 			err := ep.hns.deleteEndpoint(ep.hnsID)
 			if err == nil {
 				ep.hnsID = ""
@@ -488,18 +481,27 @@ func (ep *endpointInfo) Cleanup() {
 				klog.ErrorS(err, "Endpoint deletion failed", "ip", ep.IP())
 			}
 		}
-
-		ep.refCount = nil
 	}
 }
 
-func (refCountMap endPointsReferenceCountMap) getRefCount(hnsID string) *uint16 {
+func (ep *endpointInfo) getRefCountValue() int32 {
+	if ep.refCount != nil {
+		return *ep.refCount
+	}
+	return 0
+}
+
+func (refCountMap endPointsReferenceCountMap) getRefCount(hnsID string) *int32 {
 	refCount, exists := refCountMap[hnsID]
 	if !exists {
-		refCountMap[hnsID] = new(uint16)
+		refCountMap[hnsID] = new(int32)
 		refCount = refCountMap[hnsID]
 	}
 	return refCount
+}
+
+func (refCountMap endPointsReferenceCountMap) deleteRefCount(hnsID string) {
+	delete(refCountMap, hnsID)
 }
 
 // returns a new proxy.ServicePort which abstracts a serviceInfo
@@ -560,7 +562,7 @@ func (network hnsNetworkInfo) findRemoteSubnetProviderAddress(ip string) string 
 	return providerAddress
 }
 
-type endPointsReferenceCountMap map[string]*uint16
+type endPointsReferenceCountMap map[string]*int32
 
 // Proxier is an HNS-based proxy
 type Proxier struct {
@@ -1473,12 +1475,14 @@ func (proxier *Proxier) syncProxyRules() (retryError error) {
 	for epIP := range proxier.terminatedEndpoints {
 		klog.V(5).InfoS("Terminated endpoints ready for deletion", "epIP", epIP)
 		if epToDelete := queriedEndpoints[epIP]; epToDelete != nil && epToDelete.hnsID != "" && !epToDelete.IsLocal() {
-			if refCount := proxier.endPointsRefCount.getRefCount(epToDelete.hnsID); refCount == nil || *refCount == 0 {
+			refCount, exists := proxier.endPointsRefCount[epToDelete.hnsID]
+			if !exists || *refCount <= 0 {
 				err := proxier.hns.deleteEndpoint(epToDelete.hnsID)
 				if err != nil {
 					klog.ErrorS(err, "Deleting unreferenced remote endpoint failed", "hnsID", epToDelete.hnsID)
 				} else {
 					klog.V(3).InfoS("Deleting unreferenced remote endpoint succeeded", "hnsID", epToDelete.hnsID, "IP", epToDelete.ip)
+					proxier.endPointsRefCount.deleteRefCount(epToDelete.hnsID)
 				}
 			}
 		}
