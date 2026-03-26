@@ -46,7 +46,13 @@ GOOS=windows GOARCH=amd64 go build \
   -X k8s.io/component-base/version.gitVersion=v1.32.7 \
   -X k8s.io/component-base/version.gitCommit=$(git rev-parse HEAD) \
   -X k8s.io/component-base/version.gitTreeState=clean" \
-  -o kube-proxy.exe ./cmd
+  -o windows-kubeproxy.exe ./cmd
+```
+
+# Build & Push the Windows Container Image via ACR (No Local Docker Needed)
+```
+az acr login --name wcninternal
+az acr build --registry wcninternal --image windows-kubeproxy:v1.32.7 --platform windows/amd64 .
 ```
 
 

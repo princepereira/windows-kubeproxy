@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: windows-kubeproxy
+  namespace: kube-system
+  labels:
+    app: windows-kubeproxy
+spec:
+  selector:
+    matchLabels:
+      app: windows-kubeproxy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: windows-kubeproxy
+    spec:
+      nodeSelector:
+        kubernetes.io/os: windows
+        kubeproxy: custom
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: os
+          value: "windows"
+          effect: NoSchedule
+      serviceAccountName: kube-proxy
+      hostNetwork: true
+      initContainers:
+        - name: stop-default-kubeproxy
+          image: mcr.microsoft.com/windows/servercore:ltsc2022
+          command:
+            - powershell.exe
+          args:
+            - -Command
+            - |
+              $svc = Get-Service -Name kubeproxy -ErrorAction SilentlyContinue;
+              if ($svc) {
+                Write-Host 'Stopping default kubeproxy NSSM service...';
+                nssm stop kubeproxy;
+                nssm set kubeproxy Start SERVICE_DISABLED;
+                Write-Host 'Default kubeproxy service stopped and disabled.';
+              } else {
+                Write-Host 'No default kubeproxy service found, skipping.';
+              }
+          securityContext:
+            windowsOptions:
+              hostProcess: true
+              runAsUserName: "NT AUTHORITY\\SYSTEM"
+      containers:
+        - name: windows-kubeproxy
+          image: wcninternal.azurecr.io/windows-kubeproxy:v1.32.7
+          command:
+            - windows-kubeproxy.exe
+          args:
+            - --v=$(LOG_LEVEL)
+            - --proxy-mode=kernelspace
+            - --hostname-override=$(NODE_NAME)
+            - --kubeconfig=$(KUBECONFIG_PATH)
+            - --enable-dsr=$(ENABLE_DSR)
+            - --feature-gates=$(FEATURE_GATES)
+            - --root-hnsendpoint-name=$(ROOT_HNS_ENDPOINT_NAME)
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: LOG_LEVEL
+              value: "3"
+            - name: KUBECONFIG_PATH
+              value: "c:\\k\\config"
+            - name: ENABLE_DSR
+              value: "true"
+            - name: FEATURE_GATES
+              value: "WinDSR=true,WinOverlay=false"
+            - name: ROOT_HNS_ENDPOINT_NAME
+              value: "cbr0"
+          volumeMounts:
+            - name: kube-config
+              mountPath: c:\k
+              readOnly: true
+          securityContext:
+            windowsOptions:
+              hostProcess: true
+              runAsUserName: "NT AUTHORITY\\SYSTEM"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: kube-config
+          hostPath:
+            path: c:\k
+            type: Directory
