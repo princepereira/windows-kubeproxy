@@ -51,6 +51,19 @@ GOOS=windows GOARCH=amd64 go build \
   -o windows-kubeproxy.exe ./cmd
 ```
 
+### Build Specific Kubeproxy version From Powershell
+```powershell
+$env:GOOS="windows"
+$env:GOARCH="amd64"
+
+go build `
+  -ldflags `
+  "-X k8s.io/component-base/version.gitVersion=v1.32.7 `
+  -X k8s.io/component-base/version.gitCommit=$(git rev-parse HEAD) `
+  -X k8s.io/component-base/version.gitTreeState=clean" `
+  -o windows-kubeproxy.exe ./cmd
+```
+
 ## Deployment
 
 ### 1. Build & Push the Windows Container Image via ACR (No Local Docker Needed)
