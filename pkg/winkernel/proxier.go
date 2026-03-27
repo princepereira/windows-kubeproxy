@@ -1173,9 +1173,9 @@ func (proxier *Proxier) syncProxyRules() (retryError error) {
 		}
 	}
 
-	klog.V(3).InfoS("Syncing Policies", "proxierFamily", proxier.ipFamily, "serviceCount", len(proxier.svcPortMap), "endpointCount", len(proxier.endpointsMap), "queriedEndpointsCount", len(queriedEndpoints), "queriedLoadBalancersCount", len(queriedLoadBalancers))
+	klog.V(3).InfoS("Windows-KubeProxy Syncing Policies", "proxierFamily", proxier.ipFamily, "serviceCount", len(proxier.svcPortMap), "endpointCount", len(proxier.endpointsMap), "queriedEndpointsCount", len(queriedEndpoints), "queriedLoadBalancersCount", len(queriedLoadBalancers))
 
-	defer klog.V(3).InfoS("Syncing Policies complete", "proxierFamily", proxier.ipFamily)
+	defer klog.V(3).InfoS("Windows-KubeProxy Syncing Policies complete", "proxierFamily", proxier.ipFamily)
 
 	// Cache gateway endpoint lookup to avoid repeated HNS calls per service
 	var gatewayHnsendpoint *endpointInfo
