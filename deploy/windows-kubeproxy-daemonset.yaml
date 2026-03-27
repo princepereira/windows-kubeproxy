@@ -20,7 +20,6 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: windows
-        kubeproxy: custom
       tolerations:
         - key: node-role.kubernetes.io/master
           operator: Exists
@@ -55,20 +54,17 @@ spec:
         - name: windows-kubeproxy
           image: wcninternal.azurecr.io/windows-kubeproxy:v1.32.7
           command:
-            - windows-kubeproxy.exe
+            - cmd.exe
           args:
-            - --v=$(LOG_LEVEL)
-            - --proxy-mode=kernelspace
-            - --hostname-override=$(NODE_NAME)
-            - --kubeconfig=$(KUBECONFIG_PATH)
-            - --enable-dsr=$(ENABLE_DSR)
-            - --feature-gates=$(FEATURE_GATES)
-            - --root-hnsendpoint-name=$(ROOT_HNS_ENDPOINT_NAME)
+            - /c
+            - '%CONTAINER_SANDBOX_MOUNT_POINT%\kubeproxy\windows-kubeproxy.exe --v=$(LOG_LEVEL) --proxy-mode=kernelspace --hostname-override=$(NODE_NAME) --kubeconfig=$(KUBECONFIG_PATH) --enable-dsr=$(ENABLE_DSR) --feature-gates=$(FEATURE_GATES) --root-hnsendpoint-name=$(ROOT_HNS_ENDPOINT_NAME)'
           env:
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: KUBE_NETWORK
+              value: "azure"
             - name: LOG_LEVEL
               value: "3"
             - name: KUBECONFIG_PATH
