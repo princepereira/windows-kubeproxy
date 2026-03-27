@@ -52,6 +52,7 @@ spec:
               runAsUserName: "NT AUTHORITY\\SYSTEM"
         - name: install-kubeproxy-service
           image: wcninternal.azurecr.io/windows-kubeproxy:v1.32.7
+          imagePullPolicy: Always
           command:
             - powershell.exe
           args:
@@ -62,16 +63,16 @@ spec:
             - >-
               $ErrorActionPreference = 'Continue';
               $nssm = 'c:\k\nssm.exe';
+              $svcName = 'windows-kubeproxy';
+              & $nssm stop $svcName 2>&1 | Out-Null;
+              & $nssm remove $svcName confirm 2>&1 | Out-Null;
+              Start-Sleep -Seconds 2;
               $src = Join-Path $env:CONTAINER_SANDBOX_MOUNT_POINT 'kubeproxy\windows-kubeproxy.exe';
               $dst = 'c:\k\windows-kubeproxy.exe';
               Write-Host "Copying $src to $dst";
               Copy-Item -Path $src -Destination $dst -Force;
               if (!(Test-Path $dst)) { Write-Host 'ERROR: Copy failed'; exit 1 };
               Write-Host 'Copy succeeded';
-              $svcName = 'windows-kubeproxy';
-              & $nssm stop $svcName 2>&1 | Out-Null;
-              & $nssm remove $svcName confirm 2>&1 | Out-Null;
-              Start-Sleep -Seconds 2;
               Write-Host "Installing $svcName via NSSM...";
               & $nssm install $svcName $dst;
               & $nssm set $svcName AppParameters "--v=$env:LOG_LEVEL --proxy-mode=kernelspace --hostname-override=$env:NODE_NAME --kubeconfig=$env:KUBECONFIG_PATH --enable-dsr=$env:ENABLE_DSR --feature-gates=$env:FEATURE_GATES --root-hnsendpoint-name=$env:ROOT_HNS_ENDPOINT_NAME";
