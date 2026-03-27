@@ -71,10 +71,33 @@ az aks update -n <ClusterName> -g <ResourceGroup> --attach-acr wcninternal
 kubectl apply -f deploy/windows-kubeproxy-daemonset.yaml
 ```
 
-Verify the pods are running:
+To update an existing deployment (e.g. after changing the image or configuration):
 
 ```powershell
+kubectl replace --force -f deploy/windows-kubeproxy-daemonset.yaml
+```
+
+The DaemonSet will:
+1. Stop and disable the default NSSM-managed `kubeproxy` service on each Windows node
+2. Copy the custom `windows-kubeproxy.exe` to `c:\k\` and register it as a Windows service via NSSM
+3. Start the `windows-kubeproxy` service with auto-start and auto-restart on failure
+4. Tail the service logs to stdout so they are accessible via `kubectl logs`
+
+### 4. Verify the Deployment
+
+```powershell
+# Check pods are running
 kubectl get pods -n kube-system -l app=windows-kubeproxy -o wide
+
+# View live logs
+kubectl logs -f <pod-name> -n kube-system
+
+# Check the Windows service status on a node
+Get-Service windows-kubeproxy
+
+# Logs on disk are also available at:
+#   c:\k\windows-kubeproxy.log       (stdout)
+#   c:\k\windows-kubeproxy.err.log   (stderr)
 ```
 
 

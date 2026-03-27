@@ -146,20 +146,25 @@ nssm get kubeproxy Start
 
 ## 4. Deploy the Custom Kube-Proxy as an HPC DaemonSet
 
-Create the DaemonSet manifest (`custom-kube-proxy-daemonset.yaml`):
+The DaemonSet uses two init containers and a main container:
+1. **stop-default-kubeproxy** — Stops and disables the default NSSM-managed `kubeproxy` service
+2. **install-kubeproxy-service** — Copies the custom binary to `c:\k\`, registers it as a Windows service via NSSM with auto-start, restart-on-failure, and log rotation
+3. **main container** — Tails the service log file to stdout for `kubectl logs` access
+
+Create the DaemonSet manifest (`deploy/windows-kubeproxy-daemonset.yaml`):
 
 ```yaml
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: custom-kube-proxy
+  name: windows-kubeproxy
   namespace: kube-system
   labels:
-    app: custom-kube-proxy
+    app: windows-kubeproxy
 spec:
   selector:
     matchLabels:
-      app: custom-kube-proxy
+      app: windows-kubeproxy
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -167,12 +172,10 @@ spec:
   template:
     metadata:
       labels:
-        app: custom-kube-proxy
+        app: windows-kubeproxy
     spec:
-      # Only schedule on HPC Windows nodes labelled with kubeproxy=custom
       nodeSelector:
         kubernetes.io/os: windows
-        kubeproxy: custom
       tolerations:
         - key: node-role.kubernetes.io/master
           operator: Exists
@@ -183,45 +186,67 @@ spec:
       serviceAccountName: kube-proxy
       hostNetwork: true
       initContainers:
-        # Stop the default NSSM-managed kube-proxy before starting the custom one
         - name: stop-default-kubeproxy
           image: mcr.microsoft.com/windows/servercore:ltsc2022
           command:
             - powershell.exe
           args:
+            - -ExecutionPolicy
+            - Bypass
+            - -NoProfile
             - -Command
-            - |
-              $svc = Get-Service -Name kubeproxy -ErrorAction SilentlyContinue;
-              if ($svc) {
-                Write-Host 'Stopping default kubeproxy NSSM service...';
-                nssm stop kubeproxy;
-                nssm set kubeproxy Start SERVICE_DISABLED;
-                Write-Host 'Default kubeproxy service stopped and disabled.';
-              } else {
-                Write-Host 'No default kubeproxy service found, skipping.';
-              }
+            - >-
+              $ErrorActionPreference = 'Continue';
+              $nssm = 'c:\k\nssm.exe';
+              Write-Host 'Stopping default kubeproxy service...';
+              & $nssm stop kubeproxy 2>&1 | Out-Null;
+              & $nssm set kubeproxy Start SERVICE_DISABLED 2>&1 | Out-Null;
+              Write-Host 'Default kubeproxy stopped and disabled'
           securityContext:
             windowsOptions:
               hostProcess: true
               runAsUserName: "NT AUTHORITY\\SYSTEM"
-      containers:
-        - name: windows-kubeproxy
-          image: <your-registry>/windows-kubeproxy:v1.35.0
+        - name: install-kubeproxy-service
+          image: <your-registry>/windows-kubeproxy:v1.32.7
           command:
-            - windows-kubeproxy.exe
+            - powershell.exe
           args:
-            - --v=$(LOG_LEVEL)
-            - --proxy-mode=kernelspace
-            - --hostname-override=$(NODE_NAME)
-            - --kubeconfig=$(KUBECONFIG_PATH)
-            - --enable-dsr=$(ENABLE_DSR)
-            - --feature-gates=$(FEATURE_GATES)
-            - --root-hnsendpoint-name=$(ROOT_HNS_ENDPOINT_NAME)
+            - -ExecutionPolicy
+            - Bypass
+            - -NoProfile
+            - -Command
+            - >-
+              $ErrorActionPreference = 'Continue';
+              $nssm = 'c:\k\nssm.exe';
+              $src = Join-Path $env:CONTAINER_SANDBOX_MOUNT_POINT 'kubeproxy\windows-kubeproxy.exe';
+              $dst = 'c:\k\windows-kubeproxy.exe';
+              Write-Host "Copying $src to $dst";
+              Copy-Item -Path $src -Destination $dst -Force;
+              if (!(Test-Path $dst)) { Write-Host 'ERROR: Copy failed'; exit 1 };
+              Write-Host 'Copy succeeded';
+              $svcName = 'windows-kubeproxy';
+              & $nssm stop $svcName 2>&1 | Out-Null;
+              & $nssm remove $svcName confirm 2>&1 | Out-Null;
+              Start-Sleep -Seconds 2;
+              Write-Host "Installing $svcName via NSSM...";
+              & $nssm install $svcName $dst;
+              & $nssm set $svcName AppParameters "--v=$env:LOG_LEVEL --proxy-mode=kernelspace --hostname-override=$env:NODE_NAME --kubeconfig=$env:KUBECONFIG_PATH --enable-dsr=$env:ENABLE_DSR --feature-gates=$env:FEATURE_GATES --root-hnsendpoint-name=$env:ROOT_HNS_ENDPOINT_NAME";
+              & $nssm set $svcName AppEnvironmentExtra "KUBE_NETWORK=$env:KUBE_NETWORK";
+              & $nssm set $svcName Start SERVICE_AUTO_START;
+              & $nssm set $svcName AppRestartDelay 5000;
+              & $nssm set $svcName AppStdout 'c:\k\windows-kubeproxy.log';
+              & $nssm set $svcName AppStderr 'c:\k\windows-kubeproxy.err.log';
+              & $nssm set $svcName AppRotateFiles 1;
+              & $nssm set $svcName AppRotateBytes 10485760;
+              & $nssm start $svcName;
+              Write-Host "$svcName service installed and started via NSSM"
           env:
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: KUBE_NETWORK
+              value: "azure"
             - name: LOG_LEVEL
               value: "3"
             - name: KUBECONFIG_PATH
@@ -232,10 +257,24 @@ spec:
               value: "WinDSR=true,WinOverlay=false"
             - name: ROOT_HNS_ENDPOINT_NAME
               value: "cbr0"
-          volumeMounts:
-            - name: kube-config
-              mountPath: c:\k
-              readOnly: true
+          securityContext:
+            windowsOptions:
+              hostProcess: true
+              runAsUserName: "NT AUTHORITY\\SYSTEM"
+      containers:
+        - name: windows-kubeproxy
+          image: mcr.microsoft.com/windows/servercore:ltsc2022
+          command:
+            - powershell.exe
+          args:
+            - -ExecutionPolicy
+            - Bypass
+            - -NoProfile
+            - -Command
+            - >-
+              $logFile = 'c:\k\windows-kubeproxy.err.log';
+              while (!(Test-Path $logFile)) { Start-Sleep -Seconds 2 };
+              Get-Content -Path $logFile -Wait -Tail 0
           securityContext:
             windowsOptions:
               hostProcess: true
@@ -257,7 +296,7 @@ spec:
 Apply the manifest:
 
 ```bash
-kubectl apply -f custom-kube-proxy-daemonset.yaml
+kubectl apply -f deploy/windows-kubeproxy-daemonset.yaml
 ```
 
 ---
@@ -266,16 +305,20 @@ kubectl apply -f custom-kube-proxy-daemonset.yaml
 
 ```bash
 # Check DaemonSet rollout status
-kubectl -n kube-system rollout status daemonset/custom-kube-proxy
+kubectl -n kube-system rollout status daemonset/windows-kubeproxy
 
-# Verify pods are running on the expected HPC nodes
-kubectl -n kube-system get pods -l app=custom-kube-proxy -o wide
+# Verify pods are running on the expected nodes
+kubectl -n kube-system get pods -l app=windows-kubeproxy -o wide
 
-# Check logs of a specific pod
-kubectl -n kube-system logs -l app=custom-kube-proxy --tail=50
+# View live logs via kubectl (tailed from the NSSM service log)
+kubectl -n kube-system logs -f <pod-name>
 
-# Confirm the custom version is running
-kubectl -n kube-system exec <pod-name> -- windows-kubeproxy.exe --version
+# Check the Windows service status on a node
+Get-Service windows-kubeproxy
+
+# Logs on disk are also available at:
+#   c:\k\windows-kubeproxy.log       (stdout)
+#   c:\k\windows-kubeproxy.err.log   (stderr)
 ```
 
 ---
@@ -286,6 +329,7 @@ kubectl -n kube-system exec <pod-name> -- windows-kubeproxy.exe --version
 |------|--------|
 | 1 | Build the custom `windows-kubeproxy.exe` from this repo |
 | 2 | Package the binary into a Windows container image |
-| 3 | DaemonSet init container auto-stops the default NSSM kube-proxy |
-| 4 | Deploy windows-kubeproxy as a HostProcess DaemonSet (env-var configurable) |
-| 5 | Verify pods are running and proxying traffic correctly |
+| 3 | Init container stops the default NSSM-managed kube-proxy service |
+| 4 | Init container copies the binary, registers it as a Windows service via NSSM with auto-start, restart-on-failure, and log rotation |
+| 5 | Main container tails the service log to stdout for `kubectl logs` access |
+| 6 | Verify pods are running and the `windows-kubeproxy` Windows service is active |
