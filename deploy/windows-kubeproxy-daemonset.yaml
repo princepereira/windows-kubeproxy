@@ -35,29 +35,55 @@ spec:
           command:
             - powershell.exe
           args:
+            - -ExecutionPolicy
+            - Bypass
+            - -NoProfile
             - -Command
-            - |
-              $svc = Get-Service -Name kubeproxy -ErrorAction SilentlyContinue;
-              if ($svc) {
-                Write-Host 'Stopping default kubeproxy NSSM service...';
-                nssm stop kubeproxy;
-                nssm set kubeproxy Start SERVICE_DISABLED;
-                Write-Host 'Default kubeproxy service stopped and disabled.';
-              } else {
-                Write-Host 'No default kubeproxy service found, skipping.';
-              }
+            - >-
+              $ErrorActionPreference = 'Continue';
+              $nssm = 'c:\k\nssm.exe';
+              Write-Host 'Stopping default kubeproxy service...';
+              & $nssm stop kubeproxy 2>&1 | Out-Null;
+              & $nssm set kubeproxy Start SERVICE_DISABLED 2>&1 | Out-Null;
+              Write-Host 'Default kubeproxy stopped and disabled'
           securityContext:
             windowsOptions:
               hostProcess: true
               runAsUserName: "NT AUTHORITY\\SYSTEM"
-      containers:
-        - name: windows-kubeproxy
+        - name: install-kubeproxy-service
           image: wcninternal.azurecr.io/windows-kubeproxy:v1.32.7
           command:
-            - cmd.exe
+            - powershell.exe
           args:
-            - /c
-            - '%CONTAINER_SANDBOX_MOUNT_POINT%\kubeproxy\windows-kubeproxy.exe --v=$(LOG_LEVEL) --proxy-mode=kernelspace --hostname-override=$(NODE_NAME) --kubeconfig=$(KUBECONFIG_PATH) --enable-dsr=$(ENABLE_DSR) --feature-gates=$(FEATURE_GATES) --root-hnsendpoint-name=$(ROOT_HNS_ENDPOINT_NAME)'
+            - -ExecutionPolicy
+            - Bypass
+            - -NoProfile
+            - -Command
+            - >-
+              $ErrorActionPreference = 'Continue';
+              $nssm = 'c:\k\nssm.exe';
+              $src = Join-Path $env:CONTAINER_SANDBOX_MOUNT_POINT 'kubeproxy\windows-kubeproxy.exe';
+              $dst = 'c:\k\windows-kubeproxy.exe';
+              Write-Host "Copying $src to $dst";
+              Copy-Item -Path $src -Destination $dst -Force;
+              if (!(Test-Path $dst)) { Write-Host 'ERROR: Copy failed'; exit 1 };
+              Write-Host 'Copy succeeded';
+              $svcName = 'windows-kubeproxy';
+              & $nssm stop $svcName 2>&1 | Out-Null;
+              & $nssm remove $svcName confirm 2>&1 | Out-Null;
+              Start-Sleep -Seconds 2;
+              Write-Host "Installing $svcName via NSSM...";
+              & $nssm install $svcName $dst;
+              & $nssm set $svcName AppParameters "--v=$env:LOG_LEVEL --proxy-mode=kernelspace --hostname-override=$env:NODE_NAME --kubeconfig=$env:KUBECONFIG_PATH --enable-dsr=$env:ENABLE_DSR --feature-gates=$env:FEATURE_GATES --root-hnsendpoint-name=$env:ROOT_HNS_ENDPOINT_NAME";
+              & $nssm set $svcName AppEnvironmentExtra "KUBE_NETWORK=$env:KUBE_NETWORK";
+              & $nssm set $svcName Start SERVICE_AUTO_START;
+              & $nssm set $svcName AppRestartDelay 5000;
+              & $nssm set $svcName AppStdout 'c:\k\windows-kubeproxy.log';
+              & $nssm set $svcName AppStderr 'c:\k\windows-kubeproxy.err.log';
+              & $nssm set $svcName AppRotateFiles 1;
+              & $nssm set $svcName AppRotateBytes 10485760;
+              & $nssm start $svcName;
+              Write-Host "$svcName service installed and started via NSSM"
           env:
             - name: NODE_NAME
               valueFrom:
@@ -75,10 +101,24 @@ spec:
               value: "WinDSR=true,WinOverlay=false"
             - name: ROOT_HNS_ENDPOINT_NAME
               value: "cbr0"
-          volumeMounts:
-            - name: kube-config
-              mountPath: c:\k
-              readOnly: true
+          securityContext:
+            windowsOptions:
+              hostProcess: true
+              runAsUserName: "NT AUTHORITY\\SYSTEM"
+      containers:
+        - name: windows-kubeproxy
+          image: mcr.microsoft.com/windows/servercore:ltsc2022
+          command:
+            - powershell.exe
+          args:
+            - -ExecutionPolicy
+            - Bypass
+            - -NoProfile
+            - -Command
+            - >-
+              $logFile = 'c:\k\windows-kubeproxy.err.log';
+              while (!(Test-Path $logFile)) { Start-Sleep -Seconds 2 };
+              Get-Content -Path $logFile -Wait -Tail 0
           securityContext:
             windowsOptions:
               hostProcess: true
