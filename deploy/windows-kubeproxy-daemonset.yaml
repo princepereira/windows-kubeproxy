@@ -75,7 +75,9 @@ spec:
               Write-Host 'Copy succeeded';
               Write-Host "Installing $svcName via NSSM...";
               & $nssm install $svcName $dst;
-              & $nssm set $svcName AppParameters "--v=$env:LOG_LEVEL --proxy-mode=kernelspace --hostname-override=$env:NODE_NAME --kubeconfig=$env:KUBECONFIG_PATH --enable-dsr=$env:ENABLE_DSR --feature-gates=$env:FEATURE_GATES --root-hnsendpoint-name=$env:ROOT_HNS_ENDPOINT_NAME";
+              $params = "--v=$env:LOG_LEVEL --proxy-mode=kernelspace --hostname-override=$env:NODE_NAME --kubeconfig=$env:KUBECONFIG_PATH --enable-dsr=$env:ENABLE_DSR --feature-gates=$env:FEATURE_GATES --root-hnsendpoint-name=$env:ROOT_HNS_ENDPOINT_NAME";
+              if ($env:ENABLE_PROFILING -eq 'true') { $params += ' --profiling' };
+              & $nssm set $svcName AppParameters $params;
               & $nssm set $svcName AppEnvironmentExtra "KUBE_NETWORK=$env:KUBE_NETWORK";
               & $nssm set $svcName Start SERVICE_AUTO_START;
               & $nssm set $svcName AppRestartDelay 5000;
@@ -102,6 +104,8 @@ spec:
               value: "WinDSR=true,WinOverlay=false"
             - name: ROOT_HNS_ENDPOINT_NAME
               value: "cbr0"
+            - name: ENABLE_PROFILING
+              value: "true"
           securityContext:
             windowsOptions:
               hostProcess: true

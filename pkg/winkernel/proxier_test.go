@@ -28,6 +28,7 @@ import (
 	"github.com/Microsoft/hnslib/hcn"
 	"github.com/stretchr/testify/assert"
 
+	fakehcn "github.com/windows-kubeproxy/pkg/winkernel/testing"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,7 +40,6 @@ import (
 	"k8s.io/kubernetes/pkg/proxy"
 	"k8s.io/kubernetes/pkg/proxy/apis/config"
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
-	fakehcn "k8s.io/kubernetes/pkg/proxy/winkernel/testing"
 	netutils "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 )
@@ -1195,8 +1195,11 @@ func TestUpdateLoadBalancerWhenSupported(t *testing.T) {
 		t.Errorf("Incorrect refcount. Current value: %v", *epInfo.refCount)
 	}
 
-	if *proxier.endPointsRefCount["EPID-5"] != *epInfo.refCount {
-		t.Errorf("Global refCount: %v does not match endpoint refCount: %v", *proxier.endPointsRefCount[endpointGuid1], *epInfo.refCount)
+	refCount, exists := proxier.endPointsRefCount["EPID-5"]
+	if !exists || refCount == nil {
+		t.Errorf("Global refCount for EPID-5 not found")
+	} else if *refCount != *epInfo.refCount {
+		t.Errorf("Global refCount: %v does not match endpoint refCount: %v", *refCount, *epInfo.refCount)
 	}
 
 	svc = proxier.svcPortMap[svcPortName]
@@ -1337,8 +1340,11 @@ func TestUpdateLoadBalancerWhenUnsupported(t *testing.T) {
 		t.Errorf("Incorrect refcount. Current value: %v", *epInfo.refCount)
 	}
 
-	if *proxier.endPointsRefCount["EPID-5"] != *epInfo.refCount {
-		t.Errorf("Global refCount: %v does not match endpoint refCount: %v", *proxier.endPointsRefCount[endpointGuid1], *epInfo.refCount)
+	refCount, exists := proxier.endPointsRefCount["EPID-5"]
+	if !exists || refCount == nil {
+		t.Errorf("Global refCount for EPID-5 not found")
+	} else if *refCount != *epInfo.refCount {
+		t.Errorf("Global refCount: %v does not match endpoint refCount: %v", *refCount, *epInfo.refCount)
 	}
 
 	svc = proxier.svcPortMap[svcPortName]
