@@ -372,22 +372,22 @@ func (proxier *Proxier) onEndpointsMapChange(svcPortName *proxy.ServicePortName,
 			return
 		}
 
+		if !svcInfo.policyApplied {
+			// Policy was already cleaned up by a concurrent service change in
+			// onServiceMapChange, skip redundant endpoint cleanup to avoid
+			// double-decrementing the refcount.
+			klog.V(3).InfoS("Skipping endpoint cleanup, policy already cleaned up by service change", "servicePortName", svcPortName)
+			return
+		}
+
 		klog.V(3).InfoS("Endpoints are modified. Service is stale", "servicePortName", svcPortName)
 		svcInfo.cleanupAllPolicies(proxier.endpointsMap[*svcPortName], proxier.mapStaleLoadbalancers, true)
 	} else {
-		// If no service exists, just cleanup the remote endpoints
-		klog.V(3).InfoS("Endpoints are orphaned, cleaning up")
-		// Cleanup Endpoints references
-		epInfos, exists := proxier.endpointsMap[*svcPortName]
-
-		if exists {
-			// Cleanup Endpoints references
-			for _, ep := range epInfos {
-				if epInfo, ok := ep.(*endpointInfo); ok {
-					epInfo.Cleanup()
-				}
-			}
-		}
+		// If no service exists, skip cleanup here. The service deletion in
+		// onServiceMapChange already handled the refcount decrement, and
+		// stale endpoint cleanup at the end of syncProxyRules will handle
+		// deleting HNS endpoints with zero refcount.
+		klog.V(3).InfoS("Endpoints are orphaned, skipping cleanup since service deletion already handled it", "servicePortName", svcPortName)
 	}
 }
 
@@ -1480,10 +1480,12 @@ func (proxier *Proxier) syncProxyRules() (retryError error) {
 				err := proxier.hns.deleteEndpoint(epToDelete.hnsID)
 				if err != nil {
 					klog.ErrorS(err, "Deleting unreferenced remote endpoint failed", "hnsID", epToDelete.hnsID)
+				} else {
+					klog.V(3).InfoS("Deleting unreferenced remote endpoint succeeded", "hnsID", epToDelete.hnsID, "IP", epToDelete.ip)
 				}
-				proxier.endPointsRefCount.deleteRefCount(epToDelete.hnsID)
+				delete(proxier.endPointsRefCount, epToDelete.hnsID)
 			} else {
-				klog.V(5).InfoS("Endpoint still has references, skipping deletion", "epIP", epIP, "hnsID", epToDelete.hnsID, "refCount", *refCount)
+				klog.V(3).InfoS("Not deleting remote endpoint as it is still referenced", "hnsID", epToDelete.hnsID, "IP", epToDelete.ip, "refCount", *refCount)
 			}
 		}
 	}

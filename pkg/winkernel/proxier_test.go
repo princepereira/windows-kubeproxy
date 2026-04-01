@@ -753,13 +753,14 @@ func TestSharedRemoteEndpointDelete(t *testing.T) {
 	}
 
 	if *epInfo.refCount != 1 {
-		t.Errorf("Incorrect Refcount. Current value: %v", *epInfo.refCount)
+		t.Errorf("Incorrect Refcount. EP ID : %v, EP IP: %v , Current value: %v", epInfo.hnsID, epInfo.ip, *epInfo.refCount)
 	}
 
 	if *proxier.endPointsRefCount[endpointGuid1] != *epInfo.refCount {
 		t.Errorf("Global refCount: %v does not match endpoint refCount: %v", *proxier.endPointsRefCount[endpointGuid1], *epInfo.refCount)
 	}
 }
+
 func TestSharedRemoteEndpointUpdate(t *testing.T) {
 	proxier := NewFakeProxier(t, testNodeName, netutils.ParseIPSloppy("10.0.0.1"), "L2Bridge", true)
 	if proxier == nil {
