@@ -1,0 +1,21 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+
+approvers:
+  - feiskyer
+  - sbangari
+  - daschott
+  - princepereira
+reviewers:
+  - feiskyer
+  - sbangari
+  - daschott
+  - princepereira
+labels:
+  - sig/network
+  - sig/windows
+  - area/kube-proxy
+emeritus_approvers:
+  - dineshgovindasamy
+  - ksubrmnn
+  - kumarvin123
+  - madhanrm
