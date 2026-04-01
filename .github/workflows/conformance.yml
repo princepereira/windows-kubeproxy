@@ -1,0 +1,92 @@
+name: Conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Test mode'
+        required: true
+        default: 'quick'
+        type: choice
+        options:
+          - quick
+          - network-proxy
+          - certified-conformance
+
+env:
+  KIND_VERSION: v0.27.0
+  KIND_NODE_IMAGE: kindest/node:v1.33.0
+  SONOBUOY_VERSION: 0.57.3
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine test mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=quick" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Kind
+        run: |
+          curl -sSLo ./kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Install sonobuoy
+        run: |
+          curl -sSL "https://github.com/vmware-tanzu/sonobuoy/releases/download/v${SONOBUOY_VERSION}/sonobuoy_${SONOBUOY_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin sonobuoy
+          sonobuoy version
+
+      - name: Create Kind cluster
+        run: |
+          cat <<'EOF' > kind-config.yaml
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+            - role: worker
+            - role: worker
+          EOF
+          kind create cluster --config kind-config.yaml --image "${KIND_NODE_IMAGE}" --wait 5m
+          kubectl cluster-info
+          kubectl get nodes -o wide
+
+      - name: Wait for cluster readiness
+        run: |
+          echo "Waiting for all nodes to be Ready..."
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          echo "Waiting for kube-system pods..."
+          kubectl wait --for=condition=Ready pods --all -n kube-system --timeout=300s
+          kubectl get pods -A
+
+      - name: Run conformance tests
+        run: |
+          chmod +x hack/conformance-test.sh
+          hack/conformance-test.sh --mode "${{ steps.mode.outputs.mode }}"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results-${{ steps.mode.outputs.mode }}
+          path: _conformance-results/
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sonobuoy delete --wait 2>/dev/null || true
+          kind delete cluster 2>/dev/null || true
