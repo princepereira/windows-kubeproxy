@@ -120,9 +120,9 @@ type serviceInfo struct {
 	policyApplied          bool
 	remoteEndpoint         *endpointInfo
 	hns                    HostNetworkService
-	preserveDIP          bool
-	localTrafficDSR      bool
-	internalTrafficLocal bool
+	preserveDIP            bool
+	localTrafficDSR        bool
+	internalTrafficLocal   bool
 }
 
 func (info serviceInfo) String() string {
@@ -859,7 +859,7 @@ func (svcInfo *serviceInfo) cleanupAllPolicies(endpoints []proxy.Endpoint, mapSt
 			}
 		}
 	}
-	if !isEndpointChange && svcInfo.remoteEndpoint != nil {
+	if svcInfo.remoteEndpoint != nil {
 		svcInfo.remoteEndpoint.Cleanup()
 	}
 
@@ -1480,10 +1480,10 @@ func (proxier *Proxier) syncProxyRules() (retryError error) {
 				err := proxier.hns.deleteEndpoint(epToDelete.hnsID)
 				if err != nil {
 					klog.ErrorS(err, "Deleting unreferenced remote endpoint failed", "hnsID", epToDelete.hnsID)
-				} else {
-					klog.V(3).InfoS("Deleting unreferenced remote endpoint succeeded", "hnsID", epToDelete.hnsID, "IP", epToDelete.ip)
-					proxier.endPointsRefCount.deleteRefCount(epToDelete.hnsID)
 				}
+				proxier.endPointsRefCount.deleteRefCount(epToDelete.hnsID)
+			} else {
+				klog.V(5).InfoS("Endpoint still has references, skipping deletion", "epIP", epIP, "hnsID", epToDelete.hnsID, "refCount", *refCount)
 			}
 		}
 	}

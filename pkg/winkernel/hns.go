@@ -299,7 +299,7 @@ func (hns hns) deleteEndpoint(hnsID string) error {
 	}
 	err = hns.hcn.DeleteEndpoint(hnsendpoint)
 	if err == nil {
-		klog.V(3).InfoS("Remote endpoint resource deleted", "hnsID", hnsID)
+		klog.V(3).InfoS("Remote endpoint resource deleted", "hnsID", hnsID, "IP", hnsendpoint.IpConfigurations[0].IpAddress)
 	}
 	return err
 }
