@@ -33,4 +33,5 @@ go.work.sum
 
 # Conformance test results and local tools
 _conformance-results/
+_results/
 _tools/

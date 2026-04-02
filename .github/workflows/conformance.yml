@@ -1,92 +1,221 @@
-name: Conformance
+# Windows KubeProxy E2E Conformance Tests
+#
+# Provisions an AKS cluster with Windows nodes, deploys the custom
+# windows-kubeproxy daemonset, and runs the upstream Kubernetes e2e.test
+# binary with sig-network / sig-windows focus.
+#
+# This follows the sig-windows community pattern:
+#   1. Real Windows nodes (AKS) — Kind has no Windows support
+#   2. e2e.test binary — same test binary kubetest2-tester-ginkgo wraps
+#   3. Proper focus/skip tags for Windows
+#
+# Note: CAPZ (Cluster API Provider Azure) is used by upstream K8s CI for
+# unmanaged clusters. We use AKS because the daemonset expects AKS-specific
+# paths (NSSM, c:\k\, Azure CNI). To switch to CAPZ, the daemonset would
+# need adaptation for the different node layout.
+#
+# Required secrets:
+#   AZURE_CREDENTIALS       - Azure SP JSON (az ad sp create-for-rbac --sdk-auth)
+#   WINDOWS_ADMIN_PASSWORD  - Windows node password (14+ chars, complexity)
+#
+# Optional variables:
+#   ACR_NAME                - Override ACR registry (default: wcninternal)
+
+name: Windows E2E Conformance
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Test mode'
+        description: 'Test suite'
         required: true
-        default: 'quick'
+        default: 'network-proxy'
         type: choice
         options:
-          - quick
           - network-proxy
-          - certified-conformance
+          - sig-windows
+          - full-conformance
+      k8s_version:
+        description: 'Kubernetes version for AKS cluster'
+        required: true
+        default: '1.35.0'
+      proxy_image_tag:
+        description: 'windows-kubeproxy image tag to test'
+        required: true
+        default: 'ci-test'
+      win_node_count:
+        description: 'Number of Windows worker nodes'
+        required: false
+        default: '2'
 
 env:
-  KIND_VERSION: v0.27.0
-  KIND_NODE_IMAGE: kindest/node:v1.33.0
-  SONOBUOY_VERSION: 0.57.3
+  AZURE_LOCATION: westus2
+  ACR_NAME: wcninternal
 
 jobs:
-  conformance:
+  e2e-windows:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 180
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Determine test mode
-        id: mode
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=quick" >> "$GITHUB_OUTPUT"
-          fi
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.3'
 
-      - name: Install Kind
-        run: |
-          curl -sSLo ./kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Install sonobuoy
+      - name: Generate unique resource names
+        id: cluster
         run: |
-          curl -sSL "https://github.com/vmware-tanzu/sonobuoy/releases/download/v${SONOBUOY_VERSION}/sonobuoy_${SONOBUOY_VERSION}_linux_amd64.tar.gz" \
-            | tar -xz -C /usr/local/bin sonobuoy
-          sonobuoy version
+          NAME="wkp-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "rg=rg-${NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Create Kind cluster
+      # ── Build & Push ──────────────────────────────────────────────
+      - name: Build and push proxy image to ACR
         run: |
-          cat <<'EOF' > kind-config.yaml
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          nodes:
-            - role: control-plane
-            - role: worker
-            - role: worker
-          EOF
-          kind create cluster --config kind-config.yaml --image "${KIND_NODE_IMAGE}" --wait 5m
-          kubectl cluster-info
+          az acr login --name "${ACR_NAME}"
+          az acr build \
+            --registry "${ACR_NAME}" \
+            --image "windows-kubeproxy:${{ inputs.proxy_image_tag }}" \
+            --platform windows/amd64 \
+            .
+
+      # ── Cluster Lifecycle ─────────────────────────────────────────
+      - name: Create AKS cluster with Windows node pool
+        run: |
+          set -euo pipefail
+
+          az group create \
+            --name "${{ steps.cluster.outputs.rg }}" \
+            --location "${AZURE_LOCATION}"
+
+          # Linux system pool (control-plane components)
+          az aks create \
+            --resource-group "${{ steps.cluster.outputs.rg }}" \
+            --name "${{ steps.cluster.outputs.name }}" \
+            --location "${AZURE_LOCATION}" \
+            --kubernetes-version "${{ inputs.k8s_version }}" \
+            --node-count 1 \
+            --node-vm-size Standard_D4s_v3 \
+            --network-plugin azure \
+            --generate-ssh-keys \
+            --windows-admin-username azureuser \
+            --windows-admin-password "${{ secrets.WINDOWS_ADMIN_PASSWORD }}"
+
+          # Windows worker pool
+          az aks nodepool add \
+            --resource-group "${{ steps.cluster.outputs.rg }}" \
+            --cluster-name "${{ steps.cluster.outputs.name }}" \
+            --name winpool \
+            --os-type Windows \
+            --os-sku Windows2022 \
+            --node-count "${{ inputs.win_node_count }}" \
+            --node-vm-size Standard_D4s_v3
+
+          az aks get-credentials \
+            --resource-group "${{ steps.cluster.outputs.rg }}" \
+            --name "${{ steps.cluster.outputs.name }}" \
+            --overwrite-existing
+
+      - name: Wait for all nodes to be Ready
+        run: |
+          kubectl wait --for=condition=Ready nodes --all --timeout=600s
+          echo ""
           kubectl get nodes -o wide
 
-      - name: Wait for cluster readiness
+      # ── Deploy Custom Proxy ───────────────────────────────────────
+      - name: Deploy windows-kubeproxy daemonset
         run: |
-          echo "Waiting for all nodes to be Ready..."
-          kubectl wait --for=condition=Ready nodes --all --timeout=300s
-          echo "Waiting for kube-system pods..."
-          kubectl wait --for=condition=Ready pods --all -n kube-system --timeout=300s
-          kubectl get pods -A
+          IMAGE="${ACR_NAME}.azurecr.io/windows-kubeproxy:${{ inputs.proxy_image_tag }}"
 
-      - name: Run conformance tests
+          # Patch the daemonset to use the image we just built
+          sed "s|wcninternal.azurecr.io/windows-kubeproxy:[^ ]*|${IMAGE}|g" \
+            deploy/windows-kubeproxy-daemonset.yaml \
+            | kubectl apply -f -
+
+          echo "Waiting for daemonset rollout..."
+          kubectl rollout status daemonset/windows-kubeproxy \
+            -n kube-system --timeout=300s
+
+          echo ""
+          kubectl get pods -n kube-system -l app=windows-kubeproxy -o wide
+
+      # ── Run E2E Tests ─────────────────────────────────────────────
+      - name: Download Kubernetes e2e test binary
         run: |
-          chmod +x hack/conformance-test.sh
-          hack/conformance-test.sh --mode "${{ steps.mode.outputs.mode }}"
+          K8S_VERSION="v${{ inputs.k8s_version }}"
+          echo "Downloading e2e.test from ${K8S_VERSION}..."
+          curl -sSL "https://dl.k8s.io/${K8S_VERSION}/kubernetes-test-linux-amd64.tar.gz" \
+            | tar xz --strip-components=3 \
+              kubernetes/test/bin/e2e.test \
+              kubernetes/test/bin/ginkgo
+          chmod +x e2e.test ginkgo
+          sudo mv e2e.test ginkgo /usr/local/bin/
+          e2e.test --version || true
 
-      - name: Upload results
+      - name: Determine test focus and skip regexes
+        id: tests
+        run: |
+          MODE="${{ inputs.mode }}"
+          case "${MODE}" in
+            network-proxy)
+              FOCUS='\[sig-network\].*(Services|kube-proxy|NodePort|ClusterIP|Endpoints|Conntrack)'
+              SKIP='\[LinuxOnly\]|\[Serial\]|\[Slow\]|\[Flaky\]|\[Feature:|\[Disruptive\]'
+              ;;
+            sig-windows)
+              FOCUS='\[sig-windows\]|\[sig-network\].*\[sig-windows\]'
+              SKIP='\[LinuxOnly\]|\[Serial\]|\[Slow\]|\[Flaky\]|\[Feature:|\[Disruptive\]'
+              ;;
+            full-conformance)
+              FOCUS='\[Conformance\]'
+              SKIP='\[LinuxOnly\]|\[Flaky\]'
+              ;;
+          esac
+          echo "focus=${FOCUS}" >> "$GITHUB_OUTPUT"
+          echo "skip=${SKIP}" >> "$GITHUB_OUTPUT"
+          echo "Test mode: ${MODE}"
+          echo "  Focus: ${FOCUS}"
+          echo "  Skip:  ${SKIP}"
+
+      - name: Run e2e tests
+        run: |
+          mkdir -p _results
+
+          # Run the upstream K8s e2e test binary directly.
+          # This is the same binary that kubetest2-tester-ginkgo wraps.
+          e2e.test \
+            --kubeconfig="${HOME}/.kube/config" \
+            --provider=skeleton \
+            --ginkgo.focus='${{ steps.tests.outputs.focus }}' \
+            --ginkgo.skip='${{ steps.tests.outputs.skip }}' \
+            --node-os-distro=windows \
+            --report-dir=_results \
+            --ginkgo.timeout=2h \
+            --ginkgo.no-color \
+            --ginkgo.v \
+            2>&1 | tee _results/e2e.log
+
+      # ── Results & Cleanup ─────────────────────────────────────────
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: conformance-results-${{ steps.mode.outputs.mode }}
-          path: _conformance-results/
+          name: e2e-results-${{ inputs.mode }}-${{ github.run_id }}
+          path: _results/
           retention-days: 30
 
-      - name: Cleanup
+      - name: Delete AKS cluster and resource group
         if: always()
         run: |
-          sonobuoy delete --wait 2>/dev/null || true
-          kind delete cluster 2>/dev/null || true
+          echo "Deleting resource group ${{ steps.cluster.outputs.rg }}..."
+          az group delete \
+            --name "${{ steps.cluster.outputs.rg }}" \
+            --yes --no-wait || true
